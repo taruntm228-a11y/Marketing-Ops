@@ -96,7 +96,7 @@ export default function IcpPage() {
   return (
     <div className="mx-auto max-w-2xl px-6 py-12">
       <h1 className="text-3xl font-semibold tracking-tight">Describe your customer</h1>
-      <p className="mt-3 text-muted leading-relaxed">
+      <p className="mt-3 text-ink-soft leading-relaxed">
         You fill this in once. Every event you run after this gets scored against it. Nothing here
         has to be perfect — you&rsquo;ll see the scores and the reasoning, and you can come back
         and sharpen it.
@@ -136,21 +136,21 @@ export default function IcpPage() {
           </div>
         ))}
 
-        <div className="flex flex-wrap items-center gap-3 border-t border-line pt-6">
+        <div className="flex flex-wrap items-center gap-3 border-t border-sand pt-6">
           <button type="submit" className="btn-primary">
             Save and pick an event
           </button>
           <button type="button" className="btn-ghost" onClick={() => handleSave(false)}>
             Save
           </button>
-          {saved && <span className="text-sm text-accent">Saved.</span>}
-          <Link href="/harvest" className="ml-auto text-sm text-muted hover:text-ink">
+          {saved && <span className="text-sm text-teal">Saved.</span>}
+          <Link href="/harvest" className="ml-auto text-sm text-ink-soft hover:text-ink">
             Skip for now
           </Link>
         </div>
       </form>
 
-      <p className="mt-8 text-xs leading-relaxed text-muted">
+      <p className="mt-8 text-xs leading-relaxed text-ink-soft">
         Stored in this browser for now, not on a server. Phase 2 moves it to an account.
       </p>
     </div>

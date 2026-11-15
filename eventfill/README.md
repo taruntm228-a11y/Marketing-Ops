@@ -1,4 +1,4 @@
-# EventFill
+# Lanyard
 
 Turn a conference's public exhibitor directory into a scored outreach list, six weeks before the doors open.
 

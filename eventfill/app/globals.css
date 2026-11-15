@@ -1,80 +1,109 @@
 @import "tailwindcss";
 
+/* ---------------------------------------------------------------------------
+   Palette — from the brief.
+   Teal is the only dark value in it, so the ink is a deeper member of the same
+   family rather than a neutral black. Nothing on this page is grey.
+   --------------------------------------------------------------------------- */
 :root {
-  --bg: #fbfaf8;
-  --panel: #ffffff;
-  --ink: #16140f;
-  --muted: #6b6558;
-  --line: #e3dfd6;
-  --accent: #1f5f4f;
-  --accent-soft: #e8f0ec;
-  --warn: #8a5a1a;
-  --warn-soft: #fbf2e4;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #121211;
-    --panel: #1b1b19;
-    --ink: #ededea;
-    --muted: #9a958a;
-    --line: #302f2b;
-    --accent: #6fcfb0;
-    --accent-soft: #1b2a26;
-    --warn: #d9a765;
-    --warn-soft: #2a2218;
-  }
+  --paper: #fff3ec; /* page */
+  --peach: #ffc6b0; /* soft fill */
+  --coral: #ff9f80; /* the accent — one job, used sparingly */
+  --sand: #f2d7c6; /* borders, second fill */
+  --teal: #4e7c79; /* anchor */
+  --ink: #22403e; /* body text — deep teal, not black */
+  --ink-soft: #5c7b78;
+  --card: #fffaf6;
 }
 
 @theme inline {
-  --color-bg: var(--bg);
-  --color-panel: var(--panel);
+  --color-paper: var(--paper);
+  --color-peach: var(--peach);
+  --color-coral: var(--coral);
+  --color-sand: var(--sand);
+  --color-teal: var(--teal);
   --color-ink: var(--ink);
-  --color-muted: var(--muted);
-  --color-line: var(--line);
-  --color-accent: var(--accent);
-  --color-accent-soft: var(--accent-soft);
-  --color-warn: var(--warn);
-  --color-warn-soft: var(--warn-soft);
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
-    "Liberation Mono", monospace;
+  --color-ink-soft: var(--ink-soft);
+  --color-card: var(--card);
+
+  --font-display: "Bricolage Grotesque", Georgia, serif;
+  --font-sans: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+}
+
+html {
+  background: var(--paper);
 }
 
 body {
-  background: var(--bg);
+  background: var(--paper);
   color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 16.5px;
+  line-height: 1.6;
 }
 
-/* Shared control styles so every form doesn't repeat ten classes. */
+::selection {
+  background: var(--coral);
+  color: var(--paper);
+}
+
+/* Display type is set tight and heavy; it carries the page. */
+.display {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 0.98;
+}
+
+/* --- Controls ------------------------------------------------------------ */
+
 .field {
-  @apply w-full rounded-md border border-line bg-panel px-3 py-2 text-sm text-ink
-         placeholder:text-muted/60 outline-none
-         focus:border-accent focus:ring-2 focus:ring-accent/20;
+  @apply w-full rounded-xl border-2 border-sand bg-card px-3.5 py-2.5 text-[15px]
+         text-ink outline-none transition-colors
+         placeholder:text-ink-soft/50
+         focus:border-teal;
 }
 
 .label {
-  @apply block text-sm font-medium text-ink mb-1.5;
+  @apply block text-[15px] font-semibold text-ink mb-1;
 }
 
 .hint {
-  @apply text-xs text-muted mb-2 leading-relaxed;
+  @apply text-[13.5px] text-ink-soft mb-2 leading-relaxed;
 }
 
-/* Tailwind 4 can't @apply a custom class, so these are spelled out in full. */
 .btn-primary {
-  @apply inline-flex items-center justify-center gap-2 rounded-md px-4 py-2
-         text-sm font-medium transition-colors disabled:opacity-50
-         disabled:cursor-not-allowed bg-accent text-bg hover:opacity-90;
+  @apply inline-flex items-center justify-center rounded-full bg-teal px-6 py-3
+         text-[15px] font-semibold text-paper transition-transform
+         hover:-translate-y-0.5 active:translate-y-0
+         disabled:opacity-40 disabled:translate-y-0 disabled:cursor-not-allowed;
 }
 
 .btn-ghost {
-  @apply inline-flex items-center justify-center gap-2 rounded-md px-4 py-2
-         text-sm font-medium transition-colors disabled:opacity-50
-         disabled:cursor-not-allowed border border-line text-ink hover:bg-accent-soft;
+  @apply inline-flex items-center justify-center rounded-full border-2 border-teal
+         bg-transparent px-6 py-3 text-[15px] font-semibold text-teal
+         transition-colors hover:bg-teal hover:text-paper
+         disabled:opacity-40 disabled:cursor-not-allowed;
 }
 
-.panel {
-  @apply rounded-lg border border-line bg-panel;
+.btn-small {
+  @apply inline-flex items-center justify-center rounded-full border-2 border-sand
+         bg-card px-3.5 py-1.5 text-[13px] font-semibold text-ink
+         transition-colors hover:border-teal hover:text-teal
+         disabled:opacity-40 disabled:cursor-not-allowed;
+}
+
+:where(a, button, input, textarea):focus-visible {
+  outline: 3px solid var(--teal);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
