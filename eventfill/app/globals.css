@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #fbfaf8;
+  --panel: #ffffff;
+  --ink: #16140f;
+  --muted: #6b6558;
+  --line: #e3dfd6;
+  --accent: #1f5f4f;
+  --accent-soft: #e8f0ec;
+  --warn: #8a5a1a;
+  --warn-soft: #fbf2e4;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121211;
+    --panel: #1b1b19;
+    --ink: #ededea;
+    --muted: #9a958a;
+    --line: #302f2b;
+    --accent: #6fcfb0;
+    --accent-soft: #1b2a26;
+    --warn: #d9a765;
+    --warn-soft: #2a2218;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+}
+
+/* Shared control styles so every form doesn't repeat ten classes. */
+.field {
+  @apply w-full rounded-md border border-line bg-panel px-3 py-2 text-sm text-ink
+         placeholder:text-muted/60 outline-none
+         focus:border-accent focus:ring-2 focus:ring-accent/20;
+}
+
+.label {
+  @apply block text-sm font-medium text-ink mb-1.5;
+}
+
+.hint {
+  @apply text-xs text-muted mb-2 leading-relaxed;
+}
+
+/* Tailwind 4 can't @apply a custom class, so these are spelled out in full. */
+.btn-primary {
+  @apply inline-flex items-center justify-center gap-2 rounded-md px-4 py-2
+         text-sm font-medium transition-colors disabled:opacity-50
+         disabled:cursor-not-allowed bg-accent text-bg hover:opacity-90;
+}
+
+.btn-ghost {
+  @apply inline-flex items-center justify-center gap-2 rounded-md px-4 py-2
+         text-sm font-medium transition-colors disabled:opacity-50
+         disabled:cursor-not-allowed border border-line text-ink hover:bg-accent-soft;
+}
+
+.panel {
+  @apply rounded-lg border border-line bg-panel;
+}
