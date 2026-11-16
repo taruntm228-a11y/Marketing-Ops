@@ -15,9 +15,15 @@ export function activeProvider(): Provider {
 }
 
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL ?? "claude-haiku-5-5";
-// gemini-2.5-flash is closed to accounts created after mid-2026; Google's own
-// 404 points new keys at 3.8. Override with GOOGLE_MODEL when this ages out too.
-const GOOGLE_MODEL = process.env.GOOGLE_MODEL ?? "gemini-3.8-flash";
+// Model choice here is driven by the FREE TIER quota, not by capability.
+//   gemini-2.5-flash   — closed to accounts created after mid-2026 (404)
+//   gemini-3.8-flash   — open, but 20 requests/day free. A single large
+//                        directory costs ~6 requests, so that is three
+//                        harvests a day. Unusable.
+//   gemini-3.5-flash-lite — 500 requests/day, 15/min. ~80 harvests a day.
+// Extraction is a mechanical job, so the lighter model is no real loss.
+// Override with GOOGLE_MODEL when these numbers move again.
+const GOOGLE_MODEL = process.env.GOOGLE_MODEL ?? "gemini-3.5-flash-lite";
 
 /** Send a prompt, get raw text back. Throws with a readable message on failure. */
 export async function complete(
