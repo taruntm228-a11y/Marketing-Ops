@@ -73,3 +73,24 @@ create index if not exists harvests_event_idx on harvests (event_id, ran_at desc
 alter table events    enable row level security;
 alter table companies enable row level security;
 alter table harvests  enable row level security;
+
+-- ---------------------------------------------------------------------------
+-- Grants.
+--
+-- Newer Supabase projects do not automatically grant table privileges to
+-- service_role, so without this every request returns
+--   42501: permission denied for table events
+-- even though the secret key authenticates correctly. RLS is a separate layer:
+-- service_role bypasses RLS, but it still needs ordinary SQL privileges first.
+--
+-- The default-privileges lines cover tables added later, so this file does not
+-- have to be re-run after the next migration.
+-- ---------------------------------------------------------------------------
+grant usage on schema public to service_role;
+grant all privileges on all tables    in schema public to service_role;
+grant all privileges on all sequences in schema public to service_role;
+grant all privileges on all functions in schema public to service_role;
+
+alter default privileges in schema public grant all on tables    to service_role;
+alter default privileges in schema public grant all on sequences to service_role;
+alter default privileges in schema public grant all on functions to service_role;
