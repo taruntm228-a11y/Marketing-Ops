@@ -7,6 +7,19 @@ import { activeProvider } from "@/lib/ai";
 
 export const maxDuration = 300;
 
+/**
+ * GET /api/harvest?url=...
+ * Same work as POST, reachable from a browser address bar. Useful for checking
+ * a directory parses without going through the UI.
+ */
+export async function GET(req: Request) {
+  const target = new URL(req.url).searchParams.get("url");
+  if (!target) {
+    return NextResponse.json({ error: "Add ?url= with the directory address." }, { status: 400 });
+  }
+  return harvest(target);
+}
+
 export async function POST(req: Request) {
   let url: string;
   try {
@@ -14,6 +27,10 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: "Send a JSON body with a url." }, { status: 400 });
   }
+  return harvest(url);
+}
+
+async function harvest(url: string) {
 
   if (!url || typeof url !== "string") {
     return NextResponse.json({ error: "Paste the directory URL first." }, { status: 400 });
