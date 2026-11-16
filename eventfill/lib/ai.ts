@@ -15,7 +15,9 @@ export function activeProvider(): Provider {
 }
 
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL ?? "claude-haiku-5-5";
-const GOOGLE_MODEL = process.env.GOOGLE_MODEL ?? "gemini-2.5-flash";
+// gemini-2.5-flash is closed to accounts created after mid-2026; Google's own
+// 404 points new keys at 3.8. Override with GOOGLE_MODEL when this ages out too.
+const GOOGLE_MODEL = process.env.GOOGLE_MODEL ?? "gemini-3.8-flash";
 
 /** Send a prompt, get raw text back. Throws with a readable message on failure. */
 export async function complete(
