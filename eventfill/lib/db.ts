@@ -1,25 +1,66 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Company, HarvestResult } from "./types";
 
 /**
- * Server-side Supabase client.
+ * Supabase access, over PostgREST directly rather than @supabase/supabase-js.
  *
- * Uses the SECRET key, which bypasses Row Level Security — so this module must
- * never be imported into anything that runs in the browser. Every table has RLS
- * on with no policies, meaning the public key can read nothing at all and this
- * is the only way in.
+ * Why not the SDK: Supabase's new secret keys (sb_secret_…) are not JWTs, and
+ * must travel on the `apikey` header. The SDK also sets
+ * `Authorization: Bearer <key>`, where a non-JWT is rejected and the request
+ * quietly falls back to the anonymous role — which, with RLS on and no
+ * policies, fails as "permission denied for table events". Sending only
+ * `apikey` avoids the whole problem, and PostgREST is a plain REST API.
+ *
+ * This module uses the SECRET key, so it must never be imported by client code.
  */
-let client: SupabaseClient | null = null;
 
-export function db(): SupabaseClient | null {
+function conf() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SECRET_KEY;
-  if (!url || !key) return null; // app still works, it just won't remember
+  if (!url || !key) return null;
+  return { base: `${url.replace(/\/$/, "")}/rest/v1`, key };
+}
 
-  if (!client) {
-    client = createClient(url, key, { auth: { persistSession: false } });
+export function dbConfigured(): boolean {
+  return conf() !== null;
+}
+
+type RestOpts = {
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  body?: unknown;
+  /** PostgREST Prefer header, e.g. "resolution=merge-duplicates,return=representation" */
+  prefer?: string;
+};
+
+async function rest<T>(path: string, opts: RestOpts = {}): Promise<T> {
+  const c = conf();
+  if (!c) throw new Error("no-db");
+
+  const headers: Record<string, string> = {
+    apikey: c.key,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+  if (opts.prefer) headers.Prefer = opts.prefer;
+
+  const res = await fetch(`${c.base}${path}`, {
+    method: opts.method ?? "GET",
+    headers,
+    body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+    signal: AbortSignal.timeout(30_000),
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    let msg = text.slice(0, 300);
+    try {
+      const j = JSON.parse(text);
+      msg = j.message ?? j.error ?? msg;
+    } catch {
+      /* keep the raw text */
+    }
+    throw new Error(`${res.status}: ${msg}`);
   }
-  return client;
+  return (text ? JSON.parse(text) : null) as T;
 }
 
 export type SaveOutcome = {
@@ -33,52 +74,39 @@ export type SaveOutcome = {
 };
 
 /**
- * Persist a harvest, and work out what is new.
+ * Persist a harvest and work out what is new.
  *
- * Every row is upserted on (event_id, name). An insert stamps first_seen_at;
- * a row we have seen before only has last_seen_at moved forward. The rows whose
- * first_seen_at lands in this run are, by definition, the new arrivals.
+ * Rows upsert on (event_id, name). A company already on file only has
+ * last_seen_at moved forward; a new one gets a fresh first_seen_at. The names
+ * absent before this run are, by definition, the new arrivals.
  */
 export async function saveHarvest(
   result: HarvestResult,
   eventName: string
 ): Promise<SaveOutcome> {
-  const supabase = db();
-  if (!supabase) {
-    return { saved: false, newCount: 0, totalKnown: 0, newCompanies: [], error: "no-db" };
-  }
+  const empty = { saved: false, newCount: 0, totalKnown: 0, newCompanies: [] };
+  if (!dbConfigured()) return { ...empty, error: "no-db" };
 
   try {
     // 1. the event, keyed on its directory URL
-    const { data: event, error: eventErr } = await supabase
-      .from("events")
-      .upsert({ name: eventName, source_url: result.sourceUrl }, { onConflict: "source_url" })
-      .select("id")
-      .single();
+    const events = await rest<{ id: string }[]>("/events?on_conflict=source_url", {
+      method: "POST",
+      body: [{ name: eventName, source_url: result.sourceUrl }],
+      prefer: "resolution=merge-duplicates,return=representation",
+    });
+    const eventId = events?.[0]?.id;
+    if (!eventId) return { ...empty, error: "the event row came back without an id" };
 
-    if (eventErr || !event) {
-      return {
-        saved: false,
-        newCount: 0,
-        totalKnown: 0,
-        newCompanies: [],
-        error: eventErr?.message ?? "could not save the event",
-      };
-    }
-    const eventId = event.id as string;
-
-    // 2. which names do we already have? anything else is new.
-    const { data: existing } = await supabase
-      .from("companies")
-      .select("name")
-      .eq("event_id", eventId);
-
-    const known = new Set((existing ?? []).map((r) => (r.name as string).toLowerCase()));
+    // 2. what do we already have? anything else is new.
+    const existing = await rest<{ name: string }[]>(
+      `/companies?event_id=eq.${eventId}&select=name`
+    );
+    const known = new Set((existing ?? []).map((r) => r.name.toLowerCase()));
     const newCompanies = result.companies
       .filter((c) => !known.has(c.name.toLowerCase()))
       .map((c) => c.name);
 
-    // 3. upsert the rows. last_seen_at always moves; first_seen_at only on insert.
+    // 3. upsert, in batches so a big floor doesn't make one huge request
     const now = new Date().toISOString();
     const rows = result.companies.map((c: Company) => ({
       event_id: eventId,
@@ -92,29 +120,28 @@ export async function saveHarvest(
       last_seen_at: now,
     }));
 
-    for (let i = 0; i < rows.length; i += 500) {
-      const { error } = await supabase
-        .from("companies")
-        .upsert(rows.slice(i, i + 500), { onConflict: "event_id,name", ignoreDuplicates: false });
-      if (error) {
-        return {
-          saved: false,
-          newCount: 0,
-          totalKnown: known.size,
-          newCompanies: [],
-          error: error.message,
-        };
-      }
+    for (let i = 0; i < rows.length; i += 400) {
+      await rest("/companies?on_conflict=event_id,name", {
+        method: "POST",
+        body: rows.slice(i, i + 400),
+        prefer: "resolution=merge-duplicates,return=minimal",
+      });
     }
 
-    // 4. log the run
-    await supabase.from("harvests").insert({
-      event_id: eventId,
-      method: result.method,
-      total_found: result.companies.length,
-      new_count: newCompanies.length,
-      rejected: result.rejected,
-      notes: result.notes,
+    // 4. log the run, so "checked, nothing new" is distinguishable from "never ran"
+    await rest("/harvests", {
+      method: "POST",
+      body: [
+        {
+          event_id: eventId,
+          method: result.method,
+          total_found: result.companies.length,
+          new_count: newCompanies.length,
+          rejected: result.rejected,
+          notes: result.notes,
+        },
+      ],
+      prefer: "return=minimal",
     });
 
     return {
@@ -125,50 +152,85 @@ export async function saveHarvest(
       newCompanies,
     };
   } catch (err) {
-    return {
-      saved: false,
-      newCount: 0,
-      totalKnown: 0,
-      newCompanies: [],
-      error: (err as Error).message,
-    };
+    return { ...empty, error: (err as Error).message };
   }
 }
 
-/** Every show being tracked, most recently harvested first. */
-export async function listEvents() {
-  const supabase = db();
-  if (!supabase) return [];
+export type EventRow = {
+  id: string;
+  name: string;
+  source_url: string;
+  city: string | null;
+  starts_on: string | null;
+  created_at: string;
+};
 
-  const { data } = await supabase
-    .from("events")
-    .select("id, name, source_url, created_at, companies(count), harvests(ran_at)")
-    .order("created_at", { ascending: false });
+export type CompanyRow = {
+  id: string;
+  event_id: string;
+  name: string;
+  website: string | null;
+  booth: string | null;
+  category: string | null;
+  role: string;
+  source_url: string;
+  evidence: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  icp_score: number | null;
+  icp_reason: string | null;
+  scored_at: string | null;
+};
 
-  return data ?? [];
+export type HarvestRow = {
+  id: string;
+  event_id: string;
+  ran_at: string;
+  method: string;
+  total_found: number;
+  new_count: number;
+  rejected: number;
+  notes: string[] | null;
+};
+
+export type EventSummary = {
+  id: string;
+  name: string;
+  source_url: string;
+  created_at: string;
+  companies: { count: number }[];
+  harvests: { ran_at: string }[];
+};
+
+/** Every show being tracked, newest first. */
+export async function listEvents(): Promise<EventSummary[]> {
+  if (!dbConfigured()) return [];
+  try {
+    return await rest<EventSummary[]>(
+      "/events?select=id,name,source_url,created_at,companies(count),harvests(ran_at)" +
+        "&order=created_at.desc"
+    );
+  } catch {
+    return [];
+  }
 }
 
-/** One show, its companies newest-first so arrivals sit at the top. */
+/** One show: its companies newest-first, so arrivals sit at the top. */
 export async function getEvent(eventId: string) {
-  const supabase = db();
-  if (!supabase) return null;
+  if (!dbConfigured()) return null;
+  try {
+    const [event] = await rest<EventRow[]>(`/events?id=eq.${eventId}&select=*&limit=1`);
+    if (!event) return null;
 
-  const [{ data: event }, { data: companies }, { data: harvests }] = await Promise.all([
-    supabase.from("events").select("*").eq("id", eventId).single(),
-    supabase
-      .from("companies")
-      .select("*")
-      .eq("event_id", eventId)
-      .order("first_seen_at", { ascending: false })
-      .order("name"),
-    supabase
-      .from("harvests")
-      .select("*")
-      .eq("event_id", eventId)
-      .order("ran_at", { ascending: false })
-      .limit(10),
-  ]);
+    const [companies, harvests] = await Promise.all([
+      rest<CompanyRow[]>(
+        `/companies?event_id=eq.${eventId}&select=*&order=first_seen_at.desc,name.asc`
+      ),
+      rest<HarvestRow[]>(`/harvests?event_id=eq.${eventId}&select=*&order=ran_at.desc&limit=10`),
+    ]);
 
-  if (!event) return null;
-  return { event, companies: companies ?? [], harvests: harvests ?? [] };
+    return { event, companies: companies ?? [], harvests: harvests ?? [] };
+  } catch {
+    return null;
+  }
 }

@@ -2,20 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
-import { getEvent } from "@/lib/db";
-
-type Row = {
-  id: string;
-  name: string;
-  website: string | null;
-  booth: string | null;
-  category: string | null;
-  role: string;
-  evidence: string | null;
-  first_seen_at: string;
-  icp_score: number | null;
-  icp_reason: string | null;
-};
+import { getEvent, type CompanyRow, type HarvestRow } from "@/lib/db";
 
 const WEEK = 7 * 24 * 60 * 60 * 1000;
 
@@ -42,7 +29,7 @@ async function EventDetail({ params }: { params: PageProps<"/events/[id]">["para
   const data = await getEvent(id);
   if (!data) notFound();
 
-  const companies = data.companies as Row[];
+  const companies: CompanyRow[] = data.companies;
   const cutoff = Date.now() - WEEK;
   const fresh = companies.filter((c) => new Date(c.first_seen_at).getTime() > cutoff);
 
@@ -126,7 +113,7 @@ async function EventDetail({ params }: { params: PageProps<"/events/[id]">["para
         <section className="mt-10">
           <h2 className="text-[15px] font-semibold">Check history</h2>
           <ul className="mt-3 space-y-1.5">
-            {data.harvests.map((h: { id: string; ran_at: string; total_found: number; new_count: number; method: string }) => (
+            {data.harvests.map((h: HarvestRow) => (
               <li key={h.id} className="text-[13.5px] text-ink-soft">
                 {new Date(h.ran_at).toLocaleString()} — found {h.total_found}
                 {h.new_count > 0 ? `, ${h.new_count} new` : ", nothing new"} ({h.method})
