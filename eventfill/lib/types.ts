@@ -32,6 +32,14 @@ export type HarvestResult = {
   /** Rows the model claimed but we could not find in the page text. Dropped, but counted. */
   rejected: number;
   notes: string[];
+
+  // --- added once the harvest has been written to the database ---
+  /** Null when nothing was saved. */
+  eventId?: string | null;
+  saved?: boolean;
+  /** How many of these were seen for the first time in this run. */
+  newCount?: number | null;
+  newCompanies?: string[];
 };
 
 /** What the client tells us about who they want to meet. */

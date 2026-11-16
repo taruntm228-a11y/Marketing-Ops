@@ -36,6 +36,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               <Link href="/harvest" className="text-ink-soft hover:text-teal">
                 Find an event
               </Link>
+              <Link href="/events" className="text-ink-soft hover:text-teal">
+                Tracking
+              </Link>
             </nav>
           </div>
         </header>
