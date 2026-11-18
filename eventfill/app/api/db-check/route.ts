@@ -25,14 +25,20 @@ export async function GET() {
     keyIsJwt: key.startsWith("ey"),
   };
 
-  // 1. apikey header only — what the app does now
-  probes.apikeyOnly = await probe(`${base}/events?select=id&limit=1`, { apikey: key });
-
-  // 2. apikey + Authorization — what the SDK does
-  probes.withBearer = await probe(`${base}/events?select=id&limit=1`, {
-    apikey: key,
-    Authorization: `Bearer ${key}`,
-  });
+  // Probe every table the app needs. A missing one means the schema hasn't been
+  // re-run since it was added, which otherwise shows up much later as a feature
+  // that silently does nothing.
+  const tables: Record<string, unknown> = {};
+  for (const t of ["events", "companies", "harvests", "icp"]) {
+    const r = await probe(`${base}/${t}?select=*&limit=1`, { apikey: key });
+    tables[t] =
+      r.status === 200
+        ? "ok"
+        : r.status === 404
+          ? "MISSING — re-run supabase/schema.sql"
+          : `${r.status}: ${String(r.body ?? r.error).slice(0, 160)}`;
+  }
+  probes.tables = tables;
 
   return NextResponse.json(probes);
 }
