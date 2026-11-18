@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "schedules": {
+    "watch": {
+      "schedule": "12 6 * * *",
+      "timezone": "America/Indianapolis",
+      "path": "/api/watch",
+      "requestMethod": "GET"
+    }
+  }
+}

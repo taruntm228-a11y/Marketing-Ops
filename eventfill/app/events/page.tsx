@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { connection } from "next/server";
 import { listEvents } from "@/lib/db";
+import { WatchNow } from "./watch-now";
 
 type EventRow = {
   id: string;
@@ -54,6 +55,7 @@ async function EventList() {
   }
 
   return (
+    <>
     <ul className="mt-10 space-y-3">
       {events.map((e) => {
         const count = e.companies?.[0]?.count ?? 0;
@@ -74,5 +76,7 @@ async function EventList() {
         );
       })}
     </ul>
+    <WatchNow trackedCount={events.length} />
+    </>
   );
 }
