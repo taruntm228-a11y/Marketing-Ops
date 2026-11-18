@@ -25,13 +25,26 @@ const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL ?? "claude-haiku-5-5";
 // Override with GOOGLE_MODEL when these numbers move again.
 const GOOGLE_MODEL = process.env.GOOGLE_MODEL ?? "gemini-3.5-flash-lite";
 
+// "low" is accepted by every current Flash and Flash-Lite model. "minimal" is
+// cheaper still but 3.8-flash rejects it outright, so it is not a safe default
+// for a model name someone might change later.
+const GOOGLE_THINKING = process.env.GOOGLE_THINKING ?? "low";
+
+export type Completion = {
+  text: string;
+  /** True when the model ran out of budget mid-answer, so `text` is cut off. */
+  truncated: boolean;
+};
+
 /** Send a prompt, get raw text back. Throws with a readable message on failure. */
 export async function complete(
   prompt: string,
   opts: { maxTokens?: number; system?: string } = {}
-): Promise<string> {
+): Promise<Completion> {
   const provider = activeProvider();
-  const maxTokens = opts.maxTokens ?? 8000;
+  // Generous by default. On Gemini this budget is shared with thinking tokens,
+  // so a tight limit truncates the answer rather than making it shorter.
+  const maxTokens = opts.maxTokens ?? 16000;
 
   if (provider === "anthropic") {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -51,7 +64,10 @@ export async function complete(
     });
     if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${(await res.text()).slice(0, 300)}`);
     const data = await res.json();
-    return (data.content ?? []).map((b: { text?: string }) => b.text ?? "").join("");
+    return {
+      text: (data.content ?? []).map((b: { text?: string }) => b.text ?? "").join(""),
+      truncated: data.stop_reason === "max_tokens",
+    };
   }
 
   if (provider === "google") {
@@ -64,15 +80,27 @@ export async function complete(
       body: JSON.stringify({
         systemInstruction: opts.system ? { parts: [{ text: opts.system }] } : undefined,
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: maxTokens, temperature: 0 },
+        generationConfig: {
+          maxOutputTokens: maxTokens,
+          temperature: 0,
+          // Gemini 3 counts thinking tokens against maxOutputTokens, and it is a
+          // hard cutoff: hit it while reasoning and the answer comes back empty
+          // or cut in half with finishReason MAX_TOKENS. Extraction and scoring
+          // are mechanical, so there is nothing to think about. Gemini 3 wants
+          // thinkingLevel; thinkingBudget is the 2.5 spelling and errors here.
+          thinkingConfig: { thinkingLevel: GOOGLE_THINKING },
+          responseMimeType: "application/json",
+        },
       }),
       signal: AbortSignal.timeout(120_000),
     });
     if (!res.ok) throw new Error(`Google AI ${res.status}: ${(await res.text()).slice(0, 300)}`);
     const data = await res.json();
-    return (data.candidates?.[0]?.content?.parts ?? [])
-      .map((p: { text?: string }) => p.text ?? "")
-      .join("");
+    const cand = data.candidates?.[0];
+    return {
+      text: (cand?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? "").join(""),
+      truncated: cand?.finishReason === "MAX_TOKENS",
+    };
   }
 
   throw new Error("No model key set. Add ANTHROPIC_API_KEY or GOOGLE_AI_API_KEY.");
@@ -92,7 +120,69 @@ export function parseJsonLoose<T>(raw: string): T {
     const open = cleaned[start];
     const close = open === "[" ? "]" : "}";
     const end = cleaned.lastIndexOf(close);
-    if (end <= start) throw new Error("Model returned truncated JSON.");
-    return JSON.parse(cleaned.slice(start, end + 1)) as T;
+    if (end > start) {
+      try {
+        return JSON.parse(cleaned.slice(start, end + 1)) as T;
+      } catch {
+        /* fall through to salvage */
+      }
+    }
+    throw new Error("Model returned truncated JSON.");
   }
+}
+
+/**
+ * Recover whole objects from a cut-off JSON array.
+ *
+ * A response that ran out of budget looks like `[{...},{...},{...` — the last
+ * record is half-written, but the ones before it are perfectly good. Throwing
+ * the whole response away loses real data for no reason, so this walks the
+ * string and keeps every object whose braces balance.
+ *
+ * Quote-aware, because a brace inside a company name would otherwise throw the
+ * depth count off.
+ */
+export function salvageObjects<T>(raw: string): T[] {
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+  const out: T[] = [];
+
+  let depth = 0;
+  let objStart = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+
+    if (ch === "{") {
+      if (depth === 0) objStart = i;
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0 && objStart !== -1) {
+        try {
+          out.push(JSON.parse(cleaned.slice(objStart, i + 1)) as T);
+        } catch {
+          /* skip a malformed record, keep the rest */
+        }
+        objStart = -1;
+      }
+    }
+  }
+
+  return out;
 }

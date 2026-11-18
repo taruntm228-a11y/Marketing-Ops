@@ -1,5 +1,5 @@
 import type { Company } from "./types";
-import { complete, parseJsonLoose } from "./ai";
+import { complete, parseJsonLoose, salvageObjects } from "./ai";
 
 /**
  * Read a directory page with a model — and then check its work.
@@ -43,9 +43,14 @@ export async function extractWithAi(
   const notes: string[] = [];
   const scrapedAt = new Date().toISOString();
 
-  // Big directories blow past a context window and a single response budget.
-  // Chunk on line boundaries with a small overlap so rows aren't cut in half.
-  const chunks = chunkLines(pageText, 12_000, 300);
+  // Chunk size is set by the OUTPUT budget, not the input.
+  //
+  // Each record costs roughly 60-80 tokens of JSON once the evidence string is
+  // included, so a chunk dense enough to hold 200 listings cannot be answered
+  // inside any sane response limit — the reply gets cut off mid-record. 5,000
+  // characters of directory text is about 60-80 listings, which answers well
+  // inside the budget. Overlap keeps a row from being split across chunks.
+  const chunks = chunkLines(pageText, 5_000, 300);
   if (chunks.length > 1) notes.push(`Page split into ${chunks.length} chunks for extraction.`);
 
   const haystack = norm(pageText);
@@ -74,9 +79,23 @@ ${chunk}
 
     let rows: RawRow[];
     try {
-      rows = parseJsonLoose<RawRow[]>(await complete(prompt, { system: SYSTEM, maxTokens: 8000 }));
+      const { text, truncated } = await complete(prompt, { system: SYSTEM, maxTokens: 16000 });
+
+      if (truncated) {
+        // Ran out of budget mid-answer. The completed records are still good,
+        // so keep those rather than discarding the whole chunk.
+        rows = salvageObjects<RawRow>(text);
+        notes.push(
+          `Part ${i + 1} of ${chunks.length} was cut short; kept the ${rows.length} complete record${
+            rows.length === 1 ? "" : "s"
+          } from it.`
+        );
+      } else {
+        rows = parseJsonLoose<RawRow[]>(text);
+      }
     } catch (err) {
-      notes.push(`Chunk ${i + 1} failed: ${(err as Error).message}`);
+      // Last resort: a parse failure can still hold whole objects.
+      notes.push(`Part ${i + 1} of ${chunks.length} failed: ${(err as Error).message}`);
       continue;
     }
     if (!Array.isArray(rows)) continue;
