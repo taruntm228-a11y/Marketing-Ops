@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { getEvent, type CompanyRow, type HarvestRow } from "@/lib/db";
+import { ScoreButton } from "./score-button";
 
 const WEEK = 7 * 24 * 60 * 60 * 1000;
 
@@ -32,6 +33,13 @@ async function EventDetail({ params }: { params: PageProps<"/events/[id]">["para
   const companies: CompanyRow[] = data.companies;
   const cutoff = Date.now() - WEEK;
   const fresh = companies.filter((c) => new Date(c.first_seen_at).getTime() > cutoff);
+  const unscored = companies.filter((c) => c.icp_score == null).length;
+
+  // Best fits first once scoring has run; unscored rows keep their place at the
+  // bottom rather than being mixed in as if they had scored zero.
+  const ranked = companies.some((c) => c.icp_score != null)
+    ? companies.slice().sort((a, b) => (b.icp_score ?? -1) - (a.icp_score ?? -1))
+    : companies;
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-12">
@@ -65,18 +73,20 @@ async function EventDetail({ params }: { params: PageProps<"/events/[id]">["para
         </div>
       )}
 
+      <ScoreButton eventId={data.event.id} unscored={unscored} />
+
       <div className="mt-8 overflow-x-auto rounded-2xl border-2 border-sand bg-card">
         <table className="w-full text-[14.5px]">
           <thead>
             <tr className="border-b-2 border-sand text-left text-[12.5px] font-semibold text-ink-soft">
               <th className="px-5 py-3">Organisation</th>
               <th className="px-5 py-3">Booth</th>
-              <th className="px-5 py-3">Score</th>
+              <th className="px-5 py-3">Fit</th>
               <th className="px-5 py-3">First seen</th>
             </tr>
           </thead>
           <tbody>
-            {companies.map((c) => (
+            {ranked.map((c) => (
               <tr key={c.id} className="border-b border-sand/70 last:border-0">
                 <td className="px-5 py-2.5">
                   {c.website ? (
@@ -93,11 +103,28 @@ async function EventDetail({ params }: { params: PageProps<"/events/[id]">["para
                   )}
                 </td>
                 <td className="px-5 py-2.5 text-ink-soft">{c.booth ?? "—"}</td>
-                <td className="px-5 py-2.5 text-ink-soft">
+                <td className="px-5 py-2.5">
                   {c.icp_score != null ? (
-                    <span title={c.icp_reason ?? ""}>{c.icp_score}/10</span>
+                    <div className="flex items-baseline gap-2">
+                      <span
+                        className={
+                          c.icp_score >= 7
+                            ? "font-semibold text-teal"
+                            : c.icp_score <= 3
+                              ? "text-ink-soft"
+                              : ""
+                        }
+                      >
+                        {c.icp_score}
+                      </span>
+                      {c.icp_reason && (
+                        <span className="text-[13px] leading-snug text-ink-soft">
+                          {c.icp_reason}
+                        </span>
+                      )}
+                    </div>
                   ) : (
-                    "not scored"
+                    <span className="text-ink-soft">—</span>
                   )}
                 </td>
                 <td className="px-5 py-2.5 text-ink-soft">

@@ -77,9 +77,22 @@ export default function IcpPage() {
   // fills in from storage once we're in the browser. No loading gate needed.
   const [icp, setIcp] = useState<IcpProfile>(EMPTY_ICP);
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
 
+  // Prefer what the server has: that copy is the one the Watcher scores
+  // against at 6am. Local storage is only a fallback for an offline save.
   useEffect(() => {
-    setIcp(loadIcp());
+    const local = loadIcp();
+    setIcp(local);
+    fetch("/api/icp")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.saved && d.icp?.whatYouSell) setIcp(d.icp as IcpProfile);
+      })
+      .catch(() => {
+        /* offline, keep the local copy */
+      });
   }, []);
 
   function update(key: keyof IcpProfile, value: string) {
@@ -87,9 +100,23 @@ export default function IcpPage() {
     setSaved(false);
   }
 
-  function handleSave(thenGo: boolean) {
-    saveIcp(icp);
-    setSaved(true);
+  async function handleSave(thenGo: boolean) {
+    saveIcp(icp); // instant, and a fallback if the request fails
+    setSaving(true);
+    setProblem(null);
+    try {
+      const res = await fetch("/api/icp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(icp),
+      });
+      if (!res.ok) setProblem((await res.json()).error ?? "Could not save to the server.");
+      else setSaved(true);
+    } catch {
+      setProblem("Saved in this browser, but the server could not be reached.");
+    } finally {
+      setSaving(false);
+    }
     if (thenGo) router.push("/harvest");
   }
 
@@ -137,13 +164,19 @@ export default function IcpPage() {
         ))}
 
         <div className="flex flex-wrap items-center gap-3 border-t border-sand pt-6">
-          <button type="submit" className="btn-primary">
-            Save and pick an event
+          <button type="submit" className="btn-primary" disabled={saving}>
+            {saving ? "Saving…" : "Save and pick an event"}
           </button>
-          <button type="button" className="btn-ghost" onClick={() => handleSave(false)}>
+          <button
+            type="button"
+            className="btn-ghost"
+            disabled={saving}
+            onClick={() => handleSave(false)}
+          >
             Save
           </button>
-          {saved && <span className="text-sm text-teal">Saved.</span>}
+          {saved && !problem && <span className="text-sm text-teal">Saved.</span>}
+          {problem && <span className="text-sm text-coral">{problem}</span>}
           <Link href="/harvest" className="ml-auto text-sm text-ink-soft hover:text-ink">
             Skip for now
           </Link>
@@ -151,7 +184,7 @@ export default function IcpPage() {
       </form>
 
       <p className="mt-8 text-xs leading-relaxed text-ink-soft">
-        Stored in this browser for now, not on a server. Phase 2 moves it to an account.
+        Saved to your account so the morning check can score new exhibitors while you&rsquo;re away.
       </p>
     </div>
   );

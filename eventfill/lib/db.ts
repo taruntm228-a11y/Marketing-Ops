@@ -1,4 +1,5 @@
-import type { Company, HarvestResult } from "./types";
+import type { Company, HarvestResult, IcpProfile } from "./types";
+import { EMPTY_ICP } from "./types";
 
 /**
  * Supabase access, over PostgREST directly rather than @supabase/supabase-js.
@@ -234,3 +235,122 @@ export async function getEvent(eventId: string) {
     return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// The customer profile.
+//
+// One row, enforced by a unique `singleton` column. It lives in the database
+// rather than the browser because the Watcher runs with nobody present and
+// still has to score whoever showed up overnight.
+// ---------------------------------------------------------------------------
+
+type IcpRow = {
+  company_name: string | null;
+  what_you_sell: string | null;
+  industries: string | null;
+  size_band: string | null;
+  geography: string | null;
+  titles: string | null;
+  disqualifiers: string | null;
+  example_customers: string | null;
+};
+
+export async function getIcp(): Promise<IcpProfile | null> {
+  if (!dbConfigured()) return null;
+  try {
+    const [row] = await rest<IcpRow[]>("/icp?singleton=eq.true&select=*&limit=1");
+    if (!row) return null;
+    return {
+      companyName: row.company_name ?? "",
+      whatYouSell: row.what_you_sell ?? "",
+      industries: row.industries ?? "",
+      sizeBand: row.size_band ?? "",
+      geography: row.geography ?? "",
+      titles: row.titles ?? "",
+      disqualifiers: row.disqualifiers ?? "",
+      exampleCustomers: row.example_customers ?? "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function saveIcpToDb(icp: IcpProfile): Promise<{ ok: boolean; error?: string }> {
+  if (!dbConfigured()) return { ok: false, error: "no-db" };
+  try {
+    await rest("/icp?on_conflict=singleton", {
+      method: "POST",
+      body: [
+        {
+          singleton: true,
+          company_name: icp.companyName,
+          what_you_sell: icp.whatYouSell,
+          industries: icp.industries,
+          size_band: icp.sizeBand,
+          geography: icp.geography,
+          titles: icp.titles,
+          disqualifiers: icp.disqualifiers,
+          example_customers: icp.exampleCustomers,
+          updated_at: new Date().toISOString(),
+        },
+      ],
+      prefer: "resolution=merge-duplicates,return=minimal",
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
+  }
+}
+
+/** Companies for an event, optionally only the ones never scored. */
+export async function companiesForScoring(
+  eventId: string,
+  onlyUnscored: boolean
+): Promise<CompanyRow[]> {
+  if (!dbConfigured()) return [];
+  const filter = onlyUnscored ? "&icp_score=is.null" : "";
+  try {
+    return await rest<CompanyRow[]>(
+      `/companies?event_id=eq.${eventId}${filter}&select=*&order=name.asc`
+    );
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Write scores back.
+ *
+ * One PATCH per company, because PostgREST has no bulk update by differing
+ * values. Run in small waves so a 400-company event doesn't open 400 sockets
+ * at once and trip the connection limit.
+ */
+export async function saveScores(
+  eventId: string,
+  scores: { name: string; score: number; reason: string }[]
+): Promise<number> {
+  if (!dbConfigured()) return 0;
+  const now = new Date().toISOString();
+  let written = 0;
+
+  for (let i = 0; i < scores.length; i += 10) {
+    const wave = scores.slice(i, i + 10);
+    const results = await Promise.allSettled(
+      wave.map((s) =>
+        rest(
+          `/companies?event_id=eq.${eventId}&name=eq.${encodeURIComponent(s.name)}`,
+          {
+            method: "PATCH",
+            body: { icp_score: s.score, icp_reason: s.reason, scored_at: now },
+            prefer: "return=minimal",
+          }
+        )
+      )
+    );
+    written += results.filter((r) => r.status === "fulfilled").length;
+  }
+
+  return written;
+}
+
+export { EMPTY_ICP };

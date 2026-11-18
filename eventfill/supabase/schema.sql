@@ -66,6 +66,29 @@ create table if not exists harvests (
 create index if not exists harvests_event_idx on harvests (event_id, ran_at desc);
 
 -- ---------------------------------------------------------------------------
+-- icp: who the client wants to meet.
+--
+-- This lived in the browser's local storage, which was fine while a human was
+-- always present to press the button. The Watcher runs at 6am with nobody
+-- there, and it has to score the exhibitors that appeared overnight — so the
+-- profile has to live somewhere the server can read. One row until there are
+-- accounts to separate; `singleton` enforces that.
+-- ---------------------------------------------------------------------------
+create table if not exists icp (
+  id                uuid primary key default gen_random_uuid(),
+  singleton         boolean not null default true unique,
+  company_name      text,
+  what_you_sell     text,
+  industries        text,
+  size_band         text,
+  geography         text,
+  titles            text,
+  disqualifiers     text,
+  example_customers text,
+  updated_at        timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------------
 -- Row Level Security on, with no policies: nothing reaches this data through
 -- the public key. The server uses the secret key, which bypasses RLS by design.
 -- Add policies later if the browser ever needs to read directly.
@@ -73,6 +96,7 @@ create index if not exists harvests_event_idx on harvests (event_id, ran_at desc
 alter table events    enable row level security;
 alter table companies enable row level security;
 alter table harvests  enable row level security;
+alter table icp       enable row level security;
 
 -- ---------------------------------------------------------------------------
 -- Grants.
