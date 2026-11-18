@@ -1,81 +1,83 @@
 # Lanyard
 
-Turn a conference's public exhibitor directory into a scored outreach list, six weeks before the doors open.
+Fill your calendar before the show.
 
-Phase 1 of the build plan in `architecture.md`. It harvests and displays. It does not yet score, write, or send.
+Three in four trade show attendees decide which booths to visit before they arrive. Lanyard works the six weeks before the doors open: it reads a show's public exhibitor directory, ranks it against your ideal customer, and tells you every morning who booked a booth since yesterday.
+
+Live at **[lanyard-show.vercel.app](https://lanyard-show.vercel.app)**.
 
 ---
 
-## Run it on your Mac
+## What it does
 
-You need Node 18 or newer. Check with `node --version`. If that errors, install Node from [nodejs.org](https://nodejs.org).
+| Page | What happens there |
+|---|---|
+| `/icp` | Describe your ideal customer. Saved once, used for every show. |
+| `/harvest` | Paste a directory URL. Get every exhibitor, sponsor and speaker on it. |
+| `/events` | Shows you're tracking, plus the morning check. |
+| `/events/[id]` | One show: the full floor, ranked, with new arrivals pulled to the top. |
+
+---
+
+## The idea it rests on
+
+A chat window can read a directory page too. What it cannot do is tell you **what changed**, because it wasn't there yesterday.
+
+Exhibitor lists keep growing until the show opens. A company that booked a booth this week has budget just approved and three empty days in its calendar, and nobody has contacted it yet. That fact only exists if something was watching last week.
+
+So every row carries `first_seen_at`. "New since Tuesday" is one indexed query, and it stays cheap whether you track one show or fifty.
+
+---
+
+## Running it
+
+Node 18+.
 
 ```bash
 npm install
-npm run dev
+npm run dev     # http://localhost:3000
+npm test        # 15 checks against fixture directories
 ```
 
-Open http://localhost:3000.
+It works with no API keys at all — harvesting falls back to the structural parser. Keys unlock scoring and the morning check.
 
-No API keys needed to try it. Without a key it uses the structural parser, which reads most directories perfectly well.
-
----
-
-## What works right now
-
-- **Homepage** → button to the customer form
-- **`/icp`** → describe your ideal customer. Saved in your browser for now, moves to a database in Phase 2.
-- **`/harvest`** → paste a directory URL, get a table of every organisation on it, export to CSV.
-
-Every row carries the URL it came from, the time it was read, and the literal text on the page it was read from. That provenance is what makes the outreach defensible later.
-
----
-
-## Two ways it reads a page
-
-**Structural** (default, free, instant). Directory pages are machine-generated, so the same markup repeats once per exhibitor. The parser finds the biggest repeating group — a long table or a cluster of identical links — and reads it. It doesn't care whether the site is a2z, MapYourShow, ExpoFP or something custom.
-
-**AI** (when a key is set). Hands the page text to a model and asks it to extract rows. The catch with models is that they will invent plausible companies, so this one never asks the model to recall anything. Every row must come with an `evidence` string copied verbatim from the page. If that string isn't findable in the source text, **the row is thrown away and counted as rejected**. You'll see the rejected count in the results.
-
-If the model finds materially fewer rows than the plain parser, the app keeps the parser's answer.
-
----
-
-## Adding a key
+### Keys
 
 ```bash
 cp .env.example .env.local
 ```
 
-Then open `.env.local` and paste in one key. [Google AI Studio](https://aistudio.google.com/apikey) has a free tier and is the one to start with.
+| Variable | For | Free? |
+|---|---|---|
+| `GOOGLE_AI_API_KEY` | Scoring and AI extraction | Yes — [AI Studio](https://aistudio.google.com/apikey) |
+| `SUPABASE_URL`, `SUPABASE_SECRET_KEY` | Remembering anything | Yes |
+| `CRON_SECRET` | Locks `/api/watch` to the schedule | n/a |
 
-**`.env.local` is git-ignored and must stay that way.** A key pushed to a public repo gets found by scanners within minutes. The `.gitignore` already handles this — don't edit that section.
+`.env.local` is git-ignored and must stay that way. On Vercel the same names go in **Settings → Environment Variables**.
 
-On Vercel the same variables go in **Settings → Environment Variables**. Vercel never reads your `.env.local`.
+### Database
 
----
+Run `supabase/schema.sql` in the Supabase SQL editor. Safe to re-run.
 
-## Deploying
-
-1. Push this repo to GitHub
-2. At [vercel.com](https://vercel.com), sign in **with GitHub**, then Add New → Project → import the repo
-3. Accept the defaults and deploy
-
-Every `git push` after that redeploys automatically.
-
-Vercel's free Hobby plan is licensed for personal, non-commercial use. Fine for a portfolio project. The moment there's a paying customer it's $20/month for Pro.
+Note the grants at the bottom. Newer Supabase projects don't automatically give `service_role` table privileges, and without them every query fails `42501: permission denied` even though the key authenticates fine. RLS and SQL grants are two separate locks.
 
 ---
 
-## Tests
+## How a page gets read
 
-```bash
-npm test
-```
+**Structural** (default, free, instant). Directory pages are machine-generated, so the same markup repeats once per exhibitor. The parser finds the largest repeating group — a long table, or a cluster of links pointing into the same folder at the same DOM depth — and reads it. Platform-agnostic: a2z, MapYourShow, ExpoFP and custom sites all work without a parser each.
 
-15 checks against fixture pages shaped like real directories — a table-based one, a card grid, a sponsor list, and a page with no directory on it at all. The last one matters: it proves the parser returns nothing rather than guessing.
+**AI** (when a key is set). Hands the page text to a model. Models will invent plausible companies, so this one never asks for recall: every row must carry an `evidence` string copied verbatim from the page, and a row whose evidence can't be found in the source is discarded and counted as rejected.
 
-Fixtures live in `test/fixtures.ts`. When a real directory parses badly, paste its HTML in as a new fixture, write the assertion you want, then fix the parser until it passes.
+If the model under-reads the page relative to the plain parser, the parser's answer wins.
+
+### Things that bit us
+
+**Gemini counts thinking tokens against `maxOutputTokens`,** and it's a hard cutoff — hit it mid-reasoning and the answer comes back truncated or empty with `finishReason: MAX_TOKENS`. Fixed with `thinkingConfig.thinkingLevel` (the Gemini 3 spelling; `thinkingBudget` is 2.5's and errors). Chunks are sized by expected *output*, not input.
+
+**Truncation isn't fatal.** A cut-off JSON array still holds whole records, so `salvageObjects` keeps every object whose braces balance instead of discarding the chunk.
+
+**Supabase secret keys aren't JWTs.** They go on the `apikey` header. We talk to PostgREST directly rather than through the SDK.
 
 ---
 
@@ -83,27 +85,34 @@ Fixtures live in `test/fixtures.ts`. When a real directory parses badly, paste i
 
 ```
 app/
-  page.tsx              homepage
-  icp/page.tsx          customer profile form
-  harvest/page.tsx      paste a URL, see the table
-  api/harvest/route.ts  fetch → parse → respond
+  icp/            customer profile form
+  harvest/        paste a URL
+  events/         tracking + the morning check
+  api/
+    harvest/      fetch → parse → save
+    score/        rank a floor against the profile
+    watch/        the Watcher (scheduled)
+    icp/          read and write the profile
+    db-check/     what Postgres actually says
+    ai-check/     what the model actually returns
 lib/
-  types.ts              every shape in the app
-  html.ts               fetching, HTML→text, noise filtering
-  extract-structural.ts the no-AI parser
-  extract-ai.ts         the AI parser and its hallucination guard
-  ai.ts                 thin wrapper over Google / Anthropic
-  icp-store.ts          browser storage (temporary)
-test/
-  fixtures.ts           fake directory pages
-  run.ts                the checks
+  harvest.ts      shared by the route and the schedule
+  extract-structural.ts   the no-AI parser
+  extract-ai.ts   the AI parser and its hallucination guard
+  score.ts        ranking against the profile
+  ai.ts           model wrapper, truncation handling, JSON salvage
+  db.ts           PostgREST
+test/             fixtures and checks
 ```
+
+Both diagnostic endpoints exist because guessing at a failure cost an evening, twice. They report what the service actually said.
 
 ---
 
 ## Known limits
 
-- **JavaScript-rendered directories return nothing.** Some sites draw their list after the page loads, so there's no list in the HTML we fetch. The app tells you when it thinks this happened. Phase 2 can add a headless browser.
-- **Some organisers block automated requests** and return 403. The app reports this plainly rather than failing silently.
-- **No contact emails yet.** That's Phase 4, and it's where free tiers get thin.
-- **Role labels are weak without a model.** The structural parser marks everything `unknown`.
+- **JavaScript-rendered directories return nothing.** Some sites draw their list after load, so there's no list in the HTML we fetch. The app says so when it detects it.
+- **Some organisers return 403** to automated requests. Reported plainly rather than failing silently.
+- **No contact emails yet.** That's the next phase, and it's where free tiers get thin.
+- **One customer profile.** No accounts yet, so one profile per deployment.
+- **The free Gemini tier is 500 requests a day.** Roughly 80 harvests, or a lot more scoring. Enough for now, not forever.
