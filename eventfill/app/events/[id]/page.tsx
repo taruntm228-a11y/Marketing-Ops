@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { getEvent, type CompanyRow, type HarvestRow } from "@/lib/db";
 import { ScoreButton } from "./score-button";
+import { DraftButton } from "./draft-button";
 
 const WEEK = 7 * 24 * 60 * 60 * 1000;
 
@@ -74,6 +75,8 @@ async function EventDetail({ params }: { params: PageProps<"/events/[id]">["para
       )}
 
       <ScoreButton eventId={data.event.id} unscored={unscored} />
+
+      <DraftButton eventId={data.event.id} scored={companies.length - unscored} />
 
       <div className="mt-8 overflow-x-auto rounded-2xl border-2 border-sand bg-card">
         <table className="w-full text-[14.5px]">

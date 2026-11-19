@@ -3,6 +3,7 @@ import { extractStructural } from "../lib/extract-structural";
 import { htmlToText } from "../lib/html";
 import { rank } from "../lib/search-event";
 import { nameKey } from "../lib/db";
+import { audit } from "../lib/draft";
 import { A2Z_TABLE, CARD_GRID, SPONSOR_LIST, NOT_A_DIRECTORY } from "./fixtures";
 
 let failures = 0;
@@ -183,6 +184,58 @@ test("the key matches what Postgres produced for these rows", () => {
   for (const [input, want] of expected) {
     assert.equal(nameKey(input), want, `"${input}"`);
   }
+});
+
+console.log("\nDraft audit (catching facts nobody supplied)\n");
+
+const ALLOWED = ["1520", "BICSI Winter 2027", "Longtek Technology", "Acme Cabling", "2026", "2027"];
+
+test("a clean draft raises nothing", () => {
+  const w = audit(
+    "Both at BICSI Winter 2027 — booth 1520. [first name], we fit out cable plant for data centres and I would rather talk for ten minutes at the show than send a deck. Free on the Tuesday? [your name]",
+    ALLOWED
+  );
+  assert.deepEqual(w, [], `unexpected: ${w.join("; ")}`);
+});
+
+test("an invented statistic is caught", () => {
+  const w = audit("You could cut install time 40% across your 200-person team.", ALLOWED);
+  assert.ok(
+    w.some((x) => x.includes("40") && x.includes("200")),
+    `expected both numbers flagged, got: ${w.join("; ")}`
+  );
+});
+
+test("the booth number and the event year are not flagged", () => {
+  assert.deepEqual(audit("See you at booth 1520 in 2027.", ALLOWED), []);
+});
+
+test("an invented dollar figure is caught", () => {
+  assert.ok(audit("Since your $2M round closed...", ALLOWED).length > 0);
+});
+
+test("fake familiarity is caught", () => {
+  for (const phrase of [
+    "I noticed you are expanding",
+    "I saw your new product",
+    "I've been following your work",
+    "I came across your site",
+  ]) {
+    assert.ok(audit(phrase, ALLOWED).length > 0, `missed: "${phrase}"`);
+  }
+});
+
+test("filler phrases are caught", () => {
+  assert.ok(audit("Hope this finds you well — wanted to reach out.", ALLOWED).length >= 2);
+});
+
+test("an over-long draft is flagged", () => {
+  const w = audit("word ".repeat(120), ALLOWED);
+  assert.ok(w.some((x) => x.includes("words")), `got: ${w.join("; ")}`);
+});
+
+test("a trailing full stop does not turn a known booth into an invention", () => {
+  assert.deepEqual(audit("Find us opposite 1520.", ALLOWED), []);
 });
 
 console.log("\nEvent search ranking\n");

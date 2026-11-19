@@ -35,10 +35,49 @@ export async function GET() {
       r.status === 200
         ? "ok"
         : r.status === 404
-          ? "MISSING — re-run supabase/schema.sql"
+          ? "MISSING — re-run supabase/setup.sql"
           : `${r.status}: ${String(r.body ?? r.error).slice(0, 160)}`;
   }
   probes.tables = tables;
+
+  // Is the identity rule actually holding? Two rows with the same name_key
+  // means the unique index is missing, and the next harvest will announce a
+  // company that has been on the floor for a week as a new booking. That is
+  // the one failure that would make the morning digest worth ignoring, so it
+  // gets a permanent check rather than being rediscovered in live data.
+  // This one reads the whole response rather than going through probe(), which
+  // truncates to 400 characters for safety — a truncated body would fail to
+  // parse and report "not checked" on every real floor.
+  if (tables.companies === "ok") {
+    try {
+      const res = await fetch(`${base}/companies?select=event_id,name_key&limit=20000`, {
+        headers: { apikey: key, Accept: "application/json" },
+        signal: AbortSignal.timeout(20_000),
+      });
+      const rows = (await res.json()) as { event_id: string; name_key: string | null }[];
+      const seen = new Set<string>();
+      const clashes: string[] = [];
+      let missingKey = 0;
+
+      for (const r of rows) {
+        if (!r.name_key) {
+          missingKey++;
+          continue;
+        }
+        const k = `${r.event_id}|${r.name_key}`;
+        if (seen.has(k)) clashes.push(r.name_key);
+        seen.add(k);
+      }
+
+      probes.identity = missingKey
+        ? `${missingKey} row(s) have no name_key — re-run supabase/setup.sql`
+        : clashes.length === 0
+          ? `ok — ${rows.length} rows, no duplicates`
+          : `${clashes.length} DUPLICATE(S): ${clashes.slice(0, 5).join(", ")}`;
+    } catch (err) {
+      probes.identity = `not checked — ${(err as Error).message}`;
+    }
+  }
 
   return NextResponse.json(probes);
 }
