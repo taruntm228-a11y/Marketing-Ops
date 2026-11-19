@@ -108,12 +108,14 @@ export function rank(
   let score = 10;
   const reasons: string[] = [];
 
-  // Hosted on a known directory platform.
+  // Hosted on a known directory platform. Scored below, once it is known
+  // whether the page also looks like a list — see the note there.
   let platform: string | null = null;
+  let platformPoints = 0;
   for (const p of PLATFORMS) {
     if (p.test.test(url)) {
-      score += p.points;
       platform = p.name;
+      platformPoints = p.points;
       reasons.push(`runs on ${p.name}`);
       break;
     }
@@ -131,16 +133,48 @@ export function rank(
     }
   })();
 
+  // Best path match and best title match, scored separately and then compared.
+  //
+  // An earlier version took the first entry below that matched either one and
+  // stopped, which quietly inverted the rule above: a real directory at
+  // /exhibitors titled "Exhibitor Directory" matched the title of the
+  // higher-priority "exhibitor directory" pattern before anything tested the
+  // path against plain "exhibitors", so it scored as a title match and lost to
+  // pages that were not lists at all. Seen on live BICSI results.
+  let pathPoints = 0;
+  let pathLabel = "";
+  let titlePoints = 0;
+  let titleLabel = "";
+
   for (const w of LIST_WORDS) {
-    if (w.test.test(path)) {
-      score += w.points;
-      reasons.push(w.label);
-      break;
-    } else if (w.test.test(title)) {
-      score += Math.round(w.points * 0.5);
-      reasons.push(`titled "${w.label}"`);
-      break;
+    if (w.points > pathPoints && w.test.test(path)) {
+      pathPoints = w.points;
+      pathLabel = w.label;
     }
+    if (w.points > titlePoints && w.test.test(title)) {
+      titlePoints = w.points;
+      titleLabel = w.label;
+    }
+  }
+
+  const halvedTitle = Math.round(titlePoints * 0.5);
+  let listPoints = 0;
+  if (pathPoints >= halvedTitle && pathPoints > 0) {
+    listPoints = pathPoints;
+    reasons.push(pathLabel);
+  } else if (halvedTitle > 0) {
+    listPoints = halvedTitle;
+    reasons.push(`titled "${titleLabel}"`);
+  }
+  score += listPoints;
+
+  // Being on a known platform is only strong evidence alongside a list signal.
+  // On its own it says "a page belonging to this show's directory software",
+  // which is also true of the show's schedule, its venue map and its sponsor
+  // pitch. Live BICSI results had three a2z pages, and a flat platform bonus
+  // put two non-lists above a real directory on another host.
+  if (platformPoints > 0) {
+    score += listPoints > 0 ? platformPoints : Math.round(platformPoints * 0.35);
   }
 
   // Penalties, all of them — a page can be both an article and a pitch.

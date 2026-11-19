@@ -279,6 +279,25 @@ test("the full-list parameter is rewarded over page one", () => {
   assert.ok(all > one, `Index=All ${all} should beat plain ${one}`);
 });
 
+test("a path match is not beaten by a title match on a stronger word", () => {
+  // Live BICSI result: a real directory at /exhibitors titled "Exhibitor
+  // Directory - BICSI Winter 2027" was scoring below a2z pages that were not
+  // lists, because the title matched a higher-priority pattern first and the
+  // path was never tested.
+  const real = score(
+    "https://winter2027.smallworldlabs.com/exhibitors",
+    "Exhibitor Directory - BICSI Winter 2027"
+  );
+  const notAList = score(
+    "https://s23.a2zinc.net/clients/BICSI/Winter2027/Public/Content.aspx?ID=5023",
+    "BICSI Winter 2027"
+  );
+  assert.ok(
+    real > notAList,
+    `a real directory (${real}) should beat a platform page that isn't one (${notAList})`
+  );
+});
+
 test("known platforms are named, so the UI can say what it found", () => {
   assert.equal(rank("https://s36.a2zinc.net/clients/X/Y/exhibitors.aspx", "").platform, "a2z Events");
   assert.equal(rank("https://ces.mapyourshow.com/8_0/explore/", "").platform, "Map Your Show");
