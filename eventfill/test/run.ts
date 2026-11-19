@@ -2,6 +2,7 @@ import assert from "node:assert";
 import { extractStructural } from "../lib/extract-structural";
 import { htmlToText } from "../lib/html";
 import { rank } from "../lib/search-event";
+import { nameKey } from "../lib/db";
 import { A2Z_TABLE, CARD_GRID, SPONSOR_LIST, NOT_A_DIRECTORY } from "./fixtures";
 
 let failures = 0;
@@ -121,6 +122,66 @@ test("evidence snippets are findable in the page text — the AI guard works", (
       text.includes(row.name.toLowerCase()),
       `"${row.name}" must be findable in the page text`
     );
+  }
+});
+
+console.log("\nCompany identity (must match the SQL generated column)\n");
+
+test("the three real Longtek spellings are one company", () => {
+  const keys = new Set(
+    [
+      "Longtek Technology (Thailand) CO., LTD",
+      "Longtek Technology (Thailand) Co., Ltd",
+      "LONGTEK TECHNOLOGY (THAILAND) CO., LTD.",
+      "Longtek  Technology  (Thailand)  Co.,  Ltd.",
+    ].map(nameKey)
+  );
+  assert.equal(keys.size, 1, `expected one key, got ${[...keys].join(" | ")}`);
+});
+
+test("Inc and Ltd at different booths stay different companies", () => {
+  assert.notEqual(
+    nameKey("Riverbend Controls Inc"),
+    nameKey("Riverbend Controls Ltd"),
+    "stripping the legal suffix would merge two real companies"
+  );
+});
+
+test("punctuation around a suffix does not split a company", () => {
+  assert.equal(nameKey("Riverbend Controls Inc"), nameKey("Riverbend Controls, Inc."));
+});
+
+test("accents survive, so two foreign names are not merged", () => {
+  assert.notEqual(nameKey("Société Générale"), nameKey("Societe Generale Americas"));
+  assert.ok(nameKey("Société Générale").includes("é"), "accents should not be stripped");
+});
+
+test("an ampersand reads the same as the space it replaces", () => {
+  assert.equal(nameKey("A&B Cabling"), nameKey("A B Cabling"));
+  assert.equal(nameKey("Smith & Co"), nameKey("Smith Co"));
+});
+
+test("a known limit: punctuation inside a word still splits it", () => {
+  // "3M" and "3-M" do not match, because punctuation becomes a space rather
+  // than nothing. Collapsing it to nothing instead would fix this rare case
+  // and break the common one — "Smith & Co" would stop matching "Smith Co".
+  // Verified against PostgreSQL 16: the database does exactly the same thing,
+  // which is the property that matters.
+  assert.notEqual(nameKey("3M"), nameKey("3-M"));
+  assert.equal(nameKey("3-M"), "3 m");
+});
+
+test("the key matches what Postgres produced for these rows", () => {
+  // Verified against PostgreSQL 16 running
+  //   lower(btrim(regexp_replace(name, '[[:punct:][:space:]]+', ' ', 'g')))
+  const expected: [string, string][] = [
+    ["Longtek Technology (Thailand) CO., LTD", "longtek technology thailand co ltd"],
+    ["Riverbend Controls, Inc.", "riverbend controls inc"],
+    ["Acme  Press   Brakes", "acme press brakes"],
+    ["Construction Monkey", "construction monkey"],
+  ];
+  for (const [input, want] of expected) {
+    assert.equal(nameKey(input), want, `"${input}"`);
   }
 });
 

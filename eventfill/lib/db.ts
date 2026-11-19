@@ -64,6 +64,27 @@ async function rest<T>(path: string, opts: RestOpts = {}): Promise<T> {
   return (text ? JSON.parse(text) : null) as T;
 }
 
+/**
+ * The same identity rule the database uses, in TypeScript.
+ *
+ * It has to be the same rule. The upsert conflicts on Postgres's generated
+ * name_key, so the database merges a re-punctuated company correctly — but the
+ * "what's new" list below is worked out here, in JavaScript. When the two
+ * rules disagree the row count is right and the digest still announces a new
+ * exhibitor that has been on the floor for a week, which is the failure that
+ * costs trust in the only feature that matters.
+ *
+ * Postgres: lower(btrim(regexp_replace(name, '[[:punct:][:space:]]+', ' ', 'g')))
+ * POSIX [:punct:] is every printable non-alphanumeric, non-space character,
+ * which is \p{P} and \p{S} in JavaScript's Unicode classes.
+ */
+export function nameKey(name: string): string {
+  return name
+    .replace(/[\p{P}\p{S}\s]+/gu, " ")
+    .trim()
+    .toLowerCase();
+}
+
 export type SaveOutcome = {
   saved: boolean;
   eventId?: string;
@@ -77,7 +98,7 @@ export type SaveOutcome = {
 /**
  * Persist a harvest and work out what is new.
  *
- * Rows upsert on (event_id, name). A company already on file only has
+ * Rows upsert on (event_id, name_key). A company already on file only has
  * last_seen_at moved forward; a new one gets a fresh first_seen_at. The names
  * absent before this run are, by definition, the new arrivals.
  */
@@ -99,12 +120,16 @@ export async function saveHarvest(
     if (!eventId) return { ...empty, error: "the event row came back without an id" };
 
     // 2. what do we already have? anything else is new.
-    const existing = await rest<{ name: string }[]>(
-      `/companies?event_id=eq.${eventId}&select=name`
+    //
+    // Reading name_key rather than name means the existing side of this
+    // comparison is computed by Postgres from the same expression the unique
+    // index uses, so only the incoming side depends on nameKey() agreeing.
+    const existing = await rest<{ name_key: string }[]>(
+      `/companies?event_id=eq.${eventId}&select=name_key`
     );
-    const known = new Set((existing ?? []).map((r) => r.name.toLowerCase()));
+    const known = new Set((existing ?? []).map((r) => r.name_key));
     const newCompanies = result.companies
-      .filter((c) => !known.has(c.name.toLowerCase()))
+      .filter((c) => !known.has(nameKey(c.name)))
       .map((c) => c.name);
 
     // 3. upsert, in batches so a big floor doesn't make one huge request
