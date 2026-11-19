@@ -41,8 +41,16 @@ create table if not exists companies (
   icp_reason     text,
   scored_at      timestamptz,
 
-  unique (event_id, name)
+  -- Identity is the normalised name, not the raw one. Organisers re-case their
+  -- own exhibitor names between updates ("CO., LTD" to "Co., Ltd"), and a
+  -- case-sensitive key turns that into a second row reported as a new booking.
+  -- `name` keeps the organiser's own spelling, since that is what gets shown
+  -- and what the evidence string has to match.
+  name_key text generated always as (lower(regexp_replace(btrim(name), '\s+', ' ', 'g'))) stored
 );
+
+create unique index if not exists companies_event_name_key_idx
+  on companies (event_id, name_key);
 
 create index if not exists companies_event_idx      on companies (event_id);
 create index if not exists companies_first_seen_idx on companies (event_id, first_seen_at desc);

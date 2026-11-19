@@ -122,7 +122,10 @@ export async function saveHarvest(
     }));
 
     for (let i = 0; i < rows.length; i += 400) {
-      await rest("/companies?on_conflict=event_id,name", {
+      // Conflict on the normalised key, not the raw name: organisers change
+      // capitalisation between harvests and a case-sensitive key turns the same
+      // company into a second row reported as a new arrival.
+      await rest("/companies?on_conflict=event_id,name_key", {
         method: "POST",
         body: rows.slice(i, i + 400),
         prefer: "resolution=merge-duplicates,return=minimal",
