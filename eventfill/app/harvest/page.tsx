@@ -5,14 +5,7 @@ import Link from "next/link";
 import type { Company, HarvestResult, IcpProfile } from "@/lib/types";
 import { EMPTY_ICP } from "@/lib/types";
 import { hasIcp, loadIcp } from "@/lib/icp-store";
-
-const EXAMPLES = [
-  {
-    label: "FABTECH 2026 (a2z)",
-    url: "https://s36.a2zinc.net/clients/SME/FABTECH2026/Public/Exhibitors.aspx?Index=All",
-  },
-  { label: "SLAS 2026 (ExpoFP)", url: "https://slas2026.expofp.com/" },
-];
+import { EventSearch } from "./event-search";
 
 export default function HarvestPage() {
   const [url, setUrl] = useState("");
@@ -21,10 +14,11 @@ export default function HarvestPage() {
   const [result, setResult] = useState<HarvestResult | null>(null);
   const [icp, setIcp] = useState<IcpProfile>(EMPTY_ICP);
   const [query, setQuery] = useState("");
+  const [showPaste, setShowPaste] = useState(false);
 
   useEffect(() => setIcp(loadIcp()), []);
 
-  async function run(target: string) {
+  async function run(target: string, name?: string) {
     setBusy(true);
     setError(null);
     setResult(null);
@@ -32,7 +26,7 @@ export default function HarvestPage() {
       const res = await fetch("/api/harvest", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url: target }),
+        body: JSON.stringify({ url: target, name }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Something went wrong reading that page.");
@@ -53,8 +47,8 @@ export default function HarvestPage() {
     <div className="mx-auto max-w-5xl px-6 py-12">
       <h1 className="text-3xl font-semibold tracking-tight">Find an event</h1>
       <p className="mt-3 max-w-2xl text-ink-soft leading-relaxed">
-        Paste the link to a conference&rsquo;s public exhibitor, sponsor or speaker list. Not the
-        homepage — the page that actually shows the names.
+        Type the show&rsquo;s name. Lanyard finds its exhibitor list, opens the best matches to
+        count how many names each one really has, and reads the one you pick.
       </p>
 
       {!hasIcp(icp) && (
@@ -69,41 +63,41 @@ export default function HarvestPage() {
         </div>
       )}
 
-      <form
-        className="mt-8 flex flex-col gap-3 sm:flex-row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (url.trim()) run(url.trim());
-        }}
-      >
-        <input
-          className="field flex-1 font-mono text-xs sm:text-sm"
-          placeholder="https://someshow.com/exhibitors"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          disabled={busy}
-        />
-        <button className="btn-primary sm:w-36" disabled={busy || !url.trim()}>
-          {busy ? "Reading…" : "Harvest"}
-        </button>
-      </form>
+      <div className="mt-8">
+        <EventSearch busy={busy} onPick={(u, name) => run(u, name)} />
+      </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-ink-soft">
-        <span>Try:</span>
-        {EXAMPLES.map((e) => (
-          <button
-            key={e.url}
-            type="button"
-            className="rounded border border-sand px-2 py-1 hover:bg-peach/40 hover:text-ink"
-            onClick={() => {
-              setUrl(e.url);
-              run(e.url);
+      <div className="mt-10 border-t-2 border-sand pt-6">
+        {showPaste ? (
+          <form
+            className="flex flex-col gap-3 sm:flex-row"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (url.trim()) run(url.trim());
             }}
-            disabled={busy}
           >
-            {e.label}
+            <input
+              className="field flex-1 font-mono text-xs sm:text-sm"
+              placeholder="https://someshow.com/exhibitors"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              disabled={busy}
+              autoFocus
+              aria-label="Directory URL"
+            />
+            <button className="btn-ghost sm:w-36" disabled={busy || !url.trim()}>
+              {busy ? "Reading…" : "Read it"}
+            </button>
+          </form>
+        ) : (
+          <button
+            type="button"
+            className="text-[14px] text-ink-soft underline underline-offset-2 hover:text-teal"
+            onClick={() => setShowPaste(true)}
+          >
+            Already have the link? Paste it instead
           </button>
-        ))}
+        )}
       </div>
 
       {busy && (

@@ -1,6 +1,7 @@
 import assert from "node:assert";
 import { extractStructural } from "../lib/extract-structural";
 import { htmlToText } from "../lib/html";
+import { rank } from "../lib/search-event";
 import { A2Z_TABLE, CARD_GRID, SPONSOR_LIST, NOT_A_DIRECTORY } from "./fixtures";
 
 let failures = 0;
@@ -121,6 +122,67 @@ test("evidence snippets are findable in the page text — the AI guard works", (
       `"${row.name}" must be findable in the page text`
     );
   }
+});
+
+console.log("\nEvent search ranking\n");
+
+const score = (url: string, title = "", snippet = "") => rank(url, title, snippet).score;
+
+test("a real a2z exhibitor list beats the organiser's own pitch page", () => {
+  const real = score(
+    "https://s36.a2zinc.net/clients/BICSI/Winter2027/Public/exhibitors.aspx?Index=All",
+    "Exhibitor List - BICSI Winter 2027"
+  );
+  const pitch = score(
+    "https://www.bicsi.org/conferences/winter/become-an-exhibitor",
+    "Become an Exhibitor | BICSI Winter 2027"
+  );
+  assert.ok(real > pitch, `list ${real} should beat pitch ${pitch}`);
+});
+
+test("'exhibitor resources' loses to the actual list", () => {
+  const list = score("https://show.com/exhibitor-directory", "Exhibitor Directory");
+  const admin = score("https://show.com/exhibitor-resources", "Exhibitor Resources");
+  assert.ok(list > admin, `list ${list} should beat admin ${admin}`);
+});
+
+test("an aggregator does not outrank the organiser", () => {
+  const real = score("https://slas2026.expofp.com/", "SLAS 2026 Floor Plan");
+  const agg = score("https://10times.com/slas-2026/exhibitors", "SLAS 2026 Exhibitors - 10times");
+  assert.ok(real > agg, `organiser ${real} should beat aggregator ${agg}`);
+});
+
+test("a blog post about exhibitors scores low", () => {
+  assert.ok(
+    score("https://show.com/blog/top-exhibitors-to-watch", "Top exhibitors to watch") < 30,
+    "an article should not look like a directory"
+  );
+});
+
+test("the full-list parameter is rewarded over page one", () => {
+  const all = score("https://s36.a2zinc.net/clients/X/Y/Public/exhibitors.aspx?Index=All");
+  const one = score("https://s36.a2zinc.net/clients/X/Y/Public/exhibitors.aspx");
+  assert.ok(all > one, `Index=All ${all} should beat plain ${one}`);
+});
+
+test("known platforms are named, so the UI can say what it found", () => {
+  assert.equal(rank("https://s36.a2zinc.net/clients/X/Y/exhibitors.aspx", "").platform, "a2z Events");
+  assert.equal(rank("https://ces.mapyourshow.com/8_0/explore/", "").platform, "Map Your Show");
+  assert.equal(rank("https://randomshow.com/exhibitors", "").platform, null);
+});
+
+test("a PDF is penalised — we cannot read it as a page", () => {
+  const pdf = score("https://show.com/exhibitor-list.pdf", "Exhibitor List");
+  const page = score("https://show.com/exhibitor-list", "Exhibitor List");
+  assert.ok(page > pdf, `page ${page} should beat pdf ${pdf}`);
+});
+
+test("scores stay inside 0-100 however many penalties stack", () => {
+  const s = score(
+    "https://10times.com/blog/become-an-exhibitor/register/exhibitor-portal.pdf",
+    "Become an exhibitor — register | blog"
+  );
+  assert.ok(s >= 0 && s <= 100, `score ${s} out of range`);
 });
 
 console.log(

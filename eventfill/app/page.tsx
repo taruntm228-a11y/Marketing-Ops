@@ -12,7 +12,7 @@ const STATIONS = [
     kind: "pin" as const,
     tilt: 3,
     title: "Pick a show",
-    body: "Paste the link to its public exhibitor list.",
+    body: "Type its name. We find the exhibitor list ourselves.",
   },
   {
     kind: "list" as const,
