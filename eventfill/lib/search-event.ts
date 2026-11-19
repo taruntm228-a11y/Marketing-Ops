@@ -181,17 +181,43 @@ export function rank(
 
 type TavilyResult = { title?: string; url?: string; content?: string };
 
+/**
+ * Sites that list events rather than host a show's own directory. They rank
+ * well on exactly the queries below and never carry the real exhibitor list,
+ * so they are excluded at the API rather than only penalised afterwards: ten
+ * result slots is a small budget and three of them going to aggregators is
+ * three real candidates never seen. AGGREGATORS below still penalises any that
+ * slip through under another domain.
+ */
+const EXCLUDE_DOMAINS = [
+  "10times.com",
+  "tradefairdates.com",
+  "eventseye.com",
+  "expodatabase.com",
+  "conferenceindex.org",
+  "allconferences.com",
+  "eventbrite.com",
+  "linkedin.com",
+  "facebook.com",
+  "x.com",
+  "twitter.com",
+  "instagram.com",
+  "youtube.com",
+  "reddit.com",
+  "crunchbase.com",
+];
+
 async function tavily(query: string, key: string): Promise<TavilyResult[]> {
   const res = await fetch(TAVILY_ENDPOINT, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      // Tavily accepts the key on the header now and in the body historically.
-      // Sending both costs nothing and survives either.
+      // Bearer only. Tavily's current spec defines no api_key body field, and
+      // sending one risks a 400 from a strict validator — which would make
+      // every search fail for the sake of a parameter that is not read.
       Authorization: `Bearer ${key}`,
     },
     body: JSON.stringify({
-      api_key: key,
       query,
       // "basic" is one credit, "advanced" is two. The free tier is 1,000 a
       // month and two searches run per lookup, so basic keeps this at roughly
@@ -199,6 +225,7 @@ async function tavily(query: string, key: string): Promise<TavilyResult[]> {
       search_depth: "basic",
       max_results: 10,
       include_answer: false,
+      exclude_domains: EXCLUDE_DOMAINS,
     }),
     signal: AbortSignal.timeout(20_000),
   });
