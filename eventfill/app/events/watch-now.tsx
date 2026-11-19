@@ -39,11 +39,7 @@ export function WatchNow({ trackedCount }: { trackedCount: number }) {
     setBusy(true);
     setResult(null);
     try {
-      const res = await fetch("/api/watch");
-      if (res.status === 401) {
-        setResult({ error: "This check is locked to the morning schedule." });
-        return;
-      }
+      const res = await fetch("/api/watch", { method: "POST" });
       setResult((await res.json()) as WatchResult);
       router.refresh();
     } catch (err) {

@@ -40,9 +40,12 @@ type EventReport = {
   error?: string;
 };
 
+/**
+ * GET is the scheduled entry point and is locked to CRON_SECRET, which Vercel
+ * sends on every scheduled request. Unauthenticated, it would be an open
+ * invitation to make the app re-harvest every tracked show on demand.
+ */
 export async function GET(req: Request) {
-  // Vercel sends CRON_SECRET on every scheduled request. Without this the
-  // endpoint is an open invitation to make us re-harvest every show on demand.
   const secret = process.env.CRON_SECRET;
   const auth = req.headers.get("authorization");
   const manual = new URL(req.url).searchParams.get("key");
@@ -50,7 +53,20 @@ export async function GET(req: Request) {
   if (secret && auth !== `Bearer ${secret}` && manual !== secret) {
     return new Response("Unauthorized", { status: 401 });
   }
+  return runWatch();
+}
 
+/**
+ * POST is the "check now" button. It carries no secret because the browser has
+ * none to carry — there are no accounts yet, so every other button on the site
+ * is equally open. Guarding this one while /api/harvest stands wide open would
+ * be security theatre at the cost of the feature being demonstrable.
+ */
+export async function POST() {
+  return runWatch();
+}
+
+async function runWatch() {
   const started = Date.now();
   const events = (await listEvents()) as EventSummary[];
 
