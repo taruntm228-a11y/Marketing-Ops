@@ -97,13 +97,55 @@ const AGGREGATORS =
   /(10times|tradefairdates|eventseye|expodatabase|allconferences|conferenceindex|eventbrite|linkedin|facebook|twitter|x\.com|instagram|youtube|reddit|wikipedia|glassdoor|crunchbase)\./i;
 
 /**
+ * Flatten text for loose matching: lowercase, split letter/digit runs apart,
+ * and reduce everything else to single spaces.
+ *
+ * The letter/digit split is what makes event URLs comparable. Organisers write
+ * "hlth2027.mapyourshow.com", "slas2026.expofp.com", "Winter2027" — the show's
+ * name and its year fused into one token. Separating them lets "HLTH 2027"
+ * match the first and not the second.
+ */
+function flatten(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/([a-z])(\d)/g, "$1 $2")
+    .replace(/(\d)([a-z])/g, "$1 $2")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/** Words that appear in half of all event names and identify nothing. */
+const GENERIC =
+  /^(the|and|expo|exposition|conference|conf|show|summit|event|events|forum|congress|convention|annual|international|global|world|national|america|americas|usa|group|fair|trade|week|days?)$/;
+
+/** Distinctive words from what the user typed. */
+function queryTokens(query: string): string[] {
+  return [
+    ...new Set(
+      flatten(query)
+        .split(" ")
+        .filter((t) => t.length >= 3 && !/^\d+$/.test(t) && !GENERIC.test(t))
+    ),
+  ];
+}
+
+function mentions(haystack: string, token: string): boolean {
+  // A long token can match inside a fused domain ("healthandsafetyevent").
+  // A short one cannot, or "ces" would match "process" and "services".
+  return token.length >= 5
+    ? haystack.includes(token)
+    : new RegExp(`\\b${token}\\b`).test(haystack);
+}
+
+/**
  * Exported so the ranking can be tested without a network call. The signals
  * are the whole quality of this feature, and they are worth asserting on.
  */
 export function rank(
   url: string,
   title = "",
-  snippet = ""
+  snippet = "",
+  tokens: string[] = []
 ): { score: number; platform: string | null; why: string } {
   let score = 10;
   const reasons: string[] = [];
@@ -200,6 +242,24 @@ export function rank(
   if ((snippet.match(/,/g)?.length ?? 0) > 12) {
     score += 8;
     reasons.push("the preview already shows names");
+  }
+
+  // Is this even the event that was asked for?
+  //
+  // A search for "HLTH 2027" returns the exhibitor lists of the Health &
+  // Safety Event, IPPE and CES Unveiled — all genuine directories, none of
+  // them the one wanted. Nothing above would catch that, and the verify step
+  // adds 25 points to any page with names on it, so a wrong event's large
+  // floor could be promoted over the right event's page and then tracked.
+  //
+  // One matching distinctive word is enough. Requiring all of them would
+  // reject the organiser's own page whenever a show is known by a short name.
+  if (tokens.length > 0) {
+    const haystack = `${flatten(url)} ${flatten(title)}`;
+    if (!tokens.some((t) => mentions(haystack, t))) {
+      score -= 40;
+      reasons.push("may be a different event");
+    }
   }
 
   return {
@@ -304,6 +364,7 @@ export async function findDirectories(
     `${query} exhibitor list`,
     `${query} exhibitor directory floor plan`,
   ];
+  const tokens = queryTokens(query);
 
   const settled = await Promise.allSettled(queries.map((q) => tavily(q, key)));
   const failures = settled.filter((s) => s.status === "rejected");
@@ -324,7 +385,7 @@ export async function findDirectories(
       if (!r.url) continue;
       const url = r.url.trim();
       if (seen.has(url)) continue;
-      const { score, platform, why } = rank(url, r.title ?? "", r.content ?? "");
+      const { score, platform, why } = rank(url, r.title ?? "", r.content ?? "", tokens);
       seen.set(url, {
         url,
         title: (r.title ?? url).trim(),

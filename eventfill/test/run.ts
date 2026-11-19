@@ -298,6 +298,39 @@ test("a path match is not beaten by a title match on a stronger word", () => {
   );
 });
 
+test("another event's real directory does not outrank the right one", () => {
+  // Live "HLTH 2027" results included the exhibitor lists of the Health &
+  // Safety Event, IPPE and CES Unveiled — all genuine directories, none of
+  // them HLTH. Verification adds 25 points to any page with names on it, so
+  // without this the wrong event's floor could be promoted and then tracked.
+  const t = ["hlth"];
+  const right = rank("https://hlth2027.mapyourshow.com", "HLTH 2027 | Find Exhibitors", "", t);
+  const wrong = rank(
+    "https://www.healthandsafetyevent.com/exhibitor-list?page=2",
+    "Exhibitor List | The Health & Safety Event",
+    "",
+    t
+  );
+  assert.ok(
+    right.score > wrong.score + 25,
+    `right ${right.score} must beat wrong ${wrong.score} by more than the verify bonus`
+  );
+  assert.ok(wrong.why.includes("different event"), `should be labelled: ${wrong.why}`);
+});
+
+test("a show's name fused to its year still matches", () => {
+  // "slas2026.expofp.com" has to match a search for "SLAS 2026".
+  const r = rank("https://slas2026.expofp.com/", "SLAS 2026 Floor Plan", "", ["slas"]);
+  assert.ok(!r.why.includes("different event"), `wrongly rejected: ${r.why}`);
+});
+
+test("a generic word alone does not vouch for an event", () => {
+  // "International Expo" carries no distinctive token, so nothing is rejected
+  // on its account and ranking falls back to the page signals.
+  const r = rank("https://someshow.com/exhibitors", "Exhibitors", "", []);
+  assert.ok(!r.why.includes("different event"));
+});
+
 test("known platforms are named, so the UI can say what it found", () => {
   assert.equal(rank("https://s36.a2zinc.net/clients/X/Y/exhibitors.aspx", "").platform, "a2z Events");
   assert.equal(rank("https://ces.mapyourshow.com/8_0/explore/", "").platform, "Map Your Show");
